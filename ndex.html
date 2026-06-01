@@ -1,0 +1,2168 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  BookOpen,
+  Dumbbell,
+  FlaskConical,
+  Gift,
+  Globe2,
+  LineChart,
+  Mic2,
+  PenLine,
+  Plus,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
+import {
+  Line,
+  LineChart as ReLineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const SAVE_KEY = "life-planning-game-save-v1";
+
+const INITIAL_WEIGHT = 156;
+const NORMAL_WEIGHT = 120;
+
+const INITIAL_HEALTH = 50;
+const INITIAL_KNOWLEDGE = 15;
+const INITIAL_AMBITION = 15;
+
+const skillLevels = [
+  { name: "新手", need: 100 },
+  { name: "入门", need: 500 },
+  { name: "精通", need: 2000 },
+  { name: "专家", need: 10000 },
+];
+
+const skillDisplayOrder = ["科研", "外语", "唱歌", "Python", "健身"];
+
+const statLabels = {
+  weight: "体重",
+  health: "健康值",
+  knowledge: "知识",
+  ambition: "进取心",
+};
+
+const statOptions = [
+  { value: "health", label: "健康值" },
+  { value: "knowledge", label: "知识" },
+  { value: "ambition", label: "进取心" },
+  { value: "weight", label: "体重" },
+];
+
+const unitOptions = [
+  { value: "time", label: "按次" },
+  { value: "hour", label: "按小时" },
+];
+
+const legacyPageColorMap = {
+  slate: "#020617",
+  blue: "#172554",
+  purple: "#581c87",
+  emerald: "#064e3b",
+  rose: "#881337",
+};
+
+const DEFAULT_PAGE_COLOR = "#020617";
+
+const normalizePageColor = (value) => {
+  if (!value) return DEFAULT_PAGE_COLOR;
+  if (legacyPageColorMap[value]) return legacyPageColorMap[value];
+  return value;
+};
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const round2 = (value) => Math.round(value * 100) / 100;
+
+const toNum = (value, fallback = 0) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const makeId = () => `${Date.now()}-${Math.random()}`;
+const pad2 = (value) => String(value).padStart(2, "0");
+
+const getLocalDateISO = (date = new Date()) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
+const getLocalMonthISO = (date = new Date()) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+
+const getChartDateLabel = (date = new Date()) =>
+  `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
+const getTodayText = () =>
+  new Date().toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+const getDateTimeText = () =>
+  new Date().toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function calculateWeightPointTotal(weight) {
+  const lost = Math.max(0, INITIAL_WEIGHT - weight);
+  const fullJin = Math.floor(lost);
+  let total = 0;
+
+  for (let i = 0; i < fullJin; i += 1) {
+    const tier = Math.floor(i / 10);
+    total += 10 + tier * 5;
+  }
+
+  return total;
+}
+
+function calculateHealthFromWeight(weight) {
+  const obeseLoss = Math.max(
+    0,
+    INITIAL_WEIGHT - Math.max(weight, NORMAL_WEIGHT)
+  );
+
+  return round2(obeseLoss * 0.1);
+}
+
+function StatBar({ label, value, max = 100, suffix = "" }) {
+  const percent = max === 0 ? 0 : clamp((value / max) * 100, 0, 100);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium text-slate-700">{label}</span>
+        <span className="tabular-nums text-slate-500">
+          {round2(value)}
+          {suffix}
+          {max === 100 ? " / 100" : ""}
+        </span>
+      </div>
+      <Progress value={percent} className="h-2.5 rounded-full" />
+    </div>
+  );
+}
+
+function MiniInput({ label, value, onChange, placeholder, type = "text" }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-slate-500">{label}</Label>
+      <Input
+        value={value}
+        type={type}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 rounded-xl bg-white"
+      />
+    </div>
+  );
+}
+
+function SkillCard({ name, skill }) {
+  const level = skillLevels[skill.levelIndex];
+  const percent = clamp((skill.exp / level.need) * 100, 0, 100);
+
+  return (
+    <Card className="rounded-2xl border-slate-200 shadow-sm">
+      <CardContent className="p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold text-slate-800">{name}</div>
+          <Badge variant="secondary" className="rounded-full text-[10px]">
+            {level.name}
+          </Badge>
+        </div>
+
+        <Progress value={percent} className="h-2.5" />
+
+        <div className="mt-1.5 flex justify-between text-[10px] text-slate-500">
+          <span>经验 {round2(skill.exp)}</span>
+          <span>升级 {level.need}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ShopItem({ item, points, onRedeem }) {
+  const canBuy = points >= item.cost;
+
+  return (
+    <Card className="rounded-2xl border-slate-200 shadow-sm">
+      <CardContent className="flex items-center justify-between gap-3 p-4">
+        <div>
+          <div className="font-semibold text-slate-800">{item.name}</div>
+          <div className="mt-1 text-sm text-slate-500">
+            需要 {item.cost} 积分
+          </div>
+        </div>
+
+        <Button
+          disabled={!canBuy}
+          onClick={() => onRedeem(item)}
+          className="rounded-full"
+        >
+          兑换
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function LifePlanningGameSite() {
+  const [stats, setStats] = useState({
+    weight: INITIAL_WEIGHT,
+    health: INITIAL_HEALTH,
+    knowledge: INITIAL_KNOWLEDGE,
+    ambition: INITIAL_AMBITION,
+  });
+
+  const [skills, setSkills] = useState({
+    科研: { levelIndex: 0, exp: 0 },
+    外语: { levelIndex: 0, exp: 0 },
+    唱歌: { levelIndex: 0, exp: 0 },
+    Python: { levelIndex: 0, exp: 0 },
+    健身: { levelIndex: 0, exp: 0 },
+  });
+
+  const [paperProgress, setPaperProgress] = useState(0);
+  const [paperAccepted, setPaperAccepted] = useState(false);
+
+  const [points, setPoints] = useState(0);
+
+  const [weightInput, setWeightInput] = useState(String(INITIAL_WEIGHT));
+  const [weightPointsApplied, setWeightPointsApplied] = useState(0);
+  const [weightHealthApplied, setWeightHealthApplied] = useState(0);
+
+  const [dailyGain, setDailyGain] = useState({
+    readPaperResearch: 0,
+    readPaperAmbition: 0,
+  });
+
+  const [actionMinutes, setActionMinutes] = useState({
+    readBook: "60",
+    learnLanguage: "60",
+    learnSkill: "60",
+  });
+
+  const [selectedSkill, setSelectedSkill] = useState("Python");
+  const [openActionHint, setOpenActionHint] = useState(null);
+
+  const [log, setLog] = useState([
+    {
+      id: "init",
+      message: "欢迎进入地球 Online：把现实行动数据化，慢慢升级。",
+      snapshot: null,
+      undone: false,
+    },
+  ]);
+
+  const [redeemed, setRedeemed] = useState([]);
+
+  const [pointHistory, setPointHistory] = useState([
+    {
+      id: "init-points",
+      date: getDateTimeText(),
+      reason: "初始积分",
+      change: 0,
+      before: 0,
+      after: 0,
+    },
+  ]);
+
+  const [history, setHistory] = useState([
+    {
+      day: 1,
+      date: getLocalDateISO(),
+      label: getChartDateLabel(),
+      health: INITIAL_HEALTH,
+      knowledge: INITIAL_KNOWLEDGE,
+      ambition: INITIAL_AMBITION,
+      weight: INITIAL_WEIGHT,
+    },
+  ]);
+
+  const [customAction, setCustomAction] = useState({
+    name: "早睡",
+    stat: "health",
+    skill: "none",
+    statAmount: "0.02",
+    skillAmount: "0.02",
+    points: "1",
+    unit: "time",
+  });
+
+  const [customActions, setCustomActions] = useState([]);
+  const [customActionRunHours, setCustomActionRunHours] = useState({});
+
+  const [newSkillName, setNewSkillName] = useState("");
+
+  const [customReward, setCustomReward] = useState({
+    name: "奶茶",
+    cost: "80",
+  });
+
+  const [shopItems, setShopItems] = useState([
+    { name: "韩国轮船游", cost: 5000 },
+    { name: "和田玉手串", cost: 500 },
+    { name: "商场购物额度", cost: 1000 },
+  ]);
+
+  const [ledgerForm, setLedgerForm] = useState({
+    date: getLocalDateISO(),
+    name: "",
+    amount: "",
+  });
+
+  const [ledgerMonth, setLedgerMonth] = useState(getLocalMonthISO());
+  const [ledger, setLedger] = useState([]);
+
+  const [pageColor, setPageColor] = useState(DEFAULT_PAGE_COLOR);
+  const [hasLoadedSave, setHasLoadedSave] = useState(false);
+
+  const skillNames = Object.keys(skills);
+  const selectedPageColor = normalizePageColor(pageColor);
+
+  const orderedSkillEntries = useMemo(() => {
+    const orderedNames = [
+      ...skillDisplayOrder.filter((name) => skills[name]),
+      ...Object.keys(skills).filter((name) => !skillDisplayOrder.includes(name)),
+    ];
+
+    return orderedNames.map((name) => [name, skills[name]]);
+  }, [skills]);
+
+  const createSnapshot = () => ({
+    stats,
+    skills,
+    paperProgress,
+    paperAccepted,
+    points,
+    weightPointsApplied,
+    weightHealthApplied,
+    dailyGain,
+    redeemed,
+    pointHistory,
+    history,
+    customActions,
+    customActionRunHours,
+    shopItems,
+    actionMinutes,
+    selectedSkill,
+    ledger,
+    pageColor,
+  });
+
+  const restoreSnapshot = (snapshot) => {
+    setStats(snapshot.stats);
+    setSkills(snapshot.skills);
+    setPaperProgress(snapshot.paperProgress);
+    setPaperAccepted(snapshot.paperAccepted);
+    setPoints(snapshot.points);
+    setWeightPointsApplied(snapshot.weightPointsApplied);
+    setWeightHealthApplied(snapshot.weightHealthApplied);
+    setDailyGain(snapshot.dailyGain);
+    setRedeemed(snapshot.redeemed);
+    setPointHistory(snapshot.pointHistory);
+    setHistory(snapshot.history);
+    setCustomActions(snapshot.customActions);
+    setCustomActionRunHours(snapshot.customActionRunHours);
+    setShopItems(snapshot.shopItems);
+    setActionMinutes(snapshot.actionMinutes);
+    setSelectedSkill(snapshot.selectedSkill ?? "Python");
+    setLedger(snapshot.ledger ?? []);
+    setPageColor(normalizePageColor(snapshot.pageColor ?? DEFAULT_PAGE_COLOR));
+  };
+
+  useEffect(() => {
+    const savedData = localStorage.getItem(SAVE_KEY);
+
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+
+        if (parsed.stats) setStats(parsed.stats);
+        if (parsed.skills) setSkills(parsed.skills);
+        if (parsed.paperProgress !== undefined)
+          setPaperProgress(parsed.paperProgress);
+        if (parsed.paperAccepted !== undefined)
+          setPaperAccepted(parsed.paperAccepted);
+        if (parsed.points !== undefined) setPoints(parsed.points);
+        if (parsed.weightInput !== undefined) setWeightInput(parsed.weightInput);
+        if (parsed.weightPointsApplied !== undefined)
+          setWeightPointsApplied(parsed.weightPointsApplied);
+        if (parsed.weightHealthApplied !== undefined)
+          setWeightHealthApplied(parsed.weightHealthApplied);
+        if (parsed.dailyGain) setDailyGain(parsed.dailyGain);
+        if (parsed.actionMinutes) setActionMinutes(parsed.actionMinutes);
+        if (parsed.selectedSkill) setSelectedSkill(parsed.selectedSkill);
+        if (parsed.log) setLog(parsed.log);
+        if (parsed.redeemed) setRedeemed(parsed.redeemed);
+        if (parsed.pointHistory) setPointHistory(parsed.pointHistory);
+        if (parsed.history) setHistory(parsed.history);
+        if (parsed.customAction) setCustomAction(parsed.customAction);
+        if (parsed.customActions) setCustomActions(parsed.customActions);
+        if (parsed.customActionRunHours)
+          setCustomActionRunHours(parsed.customActionRunHours);
+        if (parsed.newSkillName !== undefined)
+          setNewSkillName(parsed.newSkillName);
+        if (parsed.customReward) setCustomReward(parsed.customReward);
+        if (parsed.shopItems) setShopItems(parsed.shopItems);
+        if (parsed.ledgerForm) setLedgerForm(parsed.ledgerForm);
+        if (parsed.ledgerMonth) setLedgerMonth(parsed.ledgerMonth);
+        if (parsed.ledger) setLedger(parsed.ledger);
+        if (parsed.pageColor)
+          setPageColor(normalizePageColor(parsed.pageColor));
+      } catch (error) {
+        console.error("加载存档失败", error);
+      }
+    }
+
+    setHasLoadedSave(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedSave) return;
+
+    const saveData = {
+      stats,
+      skills,
+      paperProgress,
+      paperAccepted,
+      points,
+      weightInput,
+      weightPointsApplied,
+      weightHealthApplied,
+      dailyGain,
+      actionMinutes,
+      selectedSkill,
+      openActionHint,
+      log,
+      redeemed,
+      pointHistory,
+      history,
+      customAction,
+      customActions,
+      customActionRunHours,
+      newSkillName,
+      customReward,
+      shopItems,
+      ledgerForm,
+      ledgerMonth,
+      ledger,
+      pageColor,
+    };
+
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+  }, [
+    hasLoadedSave,
+    stats,
+    skills,
+    paperProgress,
+    paperAccepted,
+    points,
+    weightInput,
+    weightPointsApplied,
+    weightHealthApplied,
+    dailyGain,
+    actionMinutes,
+    selectedSkill,
+    openActionHint,
+    log,
+    redeemed,
+    pointHistory,
+    history,
+    customAction,
+    customActions,
+    customActionRunHours,
+    newSkillName,
+    customReward,
+    shopItems,
+    ledgerForm,
+    ledgerMonth,
+    ledger,
+    pageColor,
+  ]);
+
+  const exportData = () => {
+    const saveData = {
+      stats,
+      skills,
+      paperProgress,
+      paperAccepted,
+      points,
+      weightInput,
+      weightPointsApplied,
+      weightHealthApplied,
+      dailyGain,
+      actionMinutes,
+      selectedSkill,
+      openActionHint,
+      log,
+      redeemed,
+      pointHistory,
+      history,
+      customAction,
+      customActions,
+      customActionRunHours,
+      newSkillName,
+      customReward,
+      shopItems,
+      ledgerForm,
+      ledgerMonth,
+      ledger,
+      pageColor,
+    };
+
+    const blob = new Blob([JSON.stringify(saveData, null, 2)], {
+      type: "application/json",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = `地球online读博版备份-${getLocalDateISO()}.json`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (readerEvent) => {
+      try {
+        const parsed = JSON.parse(readerEvent.target.result);
+
+        localStorage.setItem(SAVE_KEY, JSON.stringify(parsed));
+        window.location.reload();
+      } catch (error) {
+        alert("导入失败：文件格式不正确。");
+      }
+    };
+
+    reader.readAsText(file);
+    event.target.value = "";
+  };
+
+  const clearSaveData = () => {
+    const ok = window.confirm("确定要清空所有保存数据吗？这个操作不能撤回。");
+    if (!ok) return;
+
+    localStorage.removeItem(SAVE_KEY);
+    window.location.reload();
+  };
+
+  const addLog = (message, snapshot = null) => {
+    setLog((prev) =>
+      [
+        {
+          id: makeId(),
+          message,
+          snapshot,
+          undone: false,
+        },
+        ...prev,
+      ].slice(0, 20)
+    );
+  };
+
+  const addSystemLog = (message) => {
+    setLog((prev) =>
+      [
+        {
+          id: makeId(),
+          message,
+          snapshot: null,
+          undone: false,
+        },
+        ...prev,
+      ].slice(0, 20)
+    );
+  };
+
+  const undoLogItem = (id) => {
+    const target = log.find((item) => item.id === id);
+
+    if (!target || !target.snapshot || target.undone) return;
+
+    restoreSnapshot(target.snapshot);
+
+    setLog((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              undone: true,
+              message: `已撤回：${item.message}`,
+            }
+          : item
+      )
+    );
+  };
+
+  const changePoints = (change, reason) => {
+    const pointChange = round2(change);
+
+    setPoints((prevPoints) => {
+      const before = round2(prevPoints);
+      const after = round2(prevPoints + pointChange);
+
+      setPointHistory((prev) =>
+        [
+          {
+            id: makeId(),
+            date: getDateTimeText(),
+            reason,
+            change: pointChange,
+            before,
+            after,
+          },
+          ...prev,
+        ].slice(0, 30)
+      );
+
+      return after;
+    });
+  };
+
+  const recordHistory = (nextStats) => {
+    const now = new Date();
+
+    setHistory((prev) =>
+      [
+        ...prev,
+        {
+          day: prev.length + 1,
+          date: getLocalDateISO(now),
+          label: getChartDateLabel(now),
+          health: round2(nextStats.health),
+          knowledge: round2(nextStats.knowledge),
+          ambition: round2(nextStats.ambition),
+          weight: round2(nextStats.weight),
+        },
+      ].slice(-14)
+    );
+  };
+
+  const addStats = (delta) => {
+    setStats((prev) => {
+      const next = {
+        weight:
+          delta.weight !== undefined
+            ? round2(prev.weight + delta.weight)
+            : prev.weight,
+        health:
+          delta.health !== undefined
+            ? round2(clamp(prev.health + delta.health, 0, 100))
+            : prev.health,
+        knowledge:
+          delta.knowledge !== undefined
+            ? round2(clamp(prev.knowledge + delta.knowledge, 0, 100))
+            : prev.knowledge,
+        ambition:
+          delta.ambition !== undefined
+            ? round2(clamp(prev.ambition + delta.ambition, 0, 100))
+            : prev.ambition,
+      };
+
+      recordHistory(next);
+      return next;
+    });
+  };
+
+  const updateCurrentWeight = () => {
+    const snapshot = createSnapshot();
+    const nextWeight = round2(toNum(weightInput, stats.weight));
+
+    if (nextWeight <= 0) {
+      addSystemLog("请输入有效的当前体重。");
+      return;
+    }
+
+    const nextPointTotal = calculateWeightPointTotal(nextWeight);
+    const pointDelta = nextPointTotal - weightPointsApplied;
+
+    const nextHealthTotal = calculateHealthFromWeight(nextWeight);
+    const healthDelta = round2(nextHealthTotal - weightHealthApplied);
+
+    const weightDelta = round2(nextWeight - stats.weight);
+
+    setWeightPointsApplied(nextPointTotal);
+    setWeightHealthApplied(nextHealthTotal);
+
+    if (pointDelta !== 0) {
+      changePoints(pointDelta, "更新体重");
+    }
+
+    setStats((prev) => {
+      const next = {
+        ...prev,
+        weight: nextWeight,
+        health: round2(clamp(prev.health + healthDelta, 0, 100)),
+      };
+
+      recordHistory(next);
+      return next;
+    });
+
+    const direction =
+      weightDelta < 0
+        ? `减重 ${Math.abs(weightDelta)} 斤`
+        : weightDelta > 0
+        ? `增重 ${weightDelta} 斤`
+        : "体重不变";
+
+    addLog(
+      `更新体重：${direction}，健康值 ${
+        healthDelta >= 0 ? "+" : ""
+      }${healthDelta}，积分 ${pointDelta >= 0 ? "+" : ""}${pointDelta}。`,
+      snapshot
+    );
+  };
+
+  const addSkillExp = (skillName, amount) => {
+    if (!skillName || !skills[skillName]) return;
+
+    setSkills((prev) => {
+      const current = prev[skillName];
+      const level = skillLevels[current.levelIndex];
+
+      let nextLevelIndex = current.levelIndex;
+      let nextExp = round2(current.exp + amount);
+
+      if (nextExp >= level.need && nextLevelIndex < skillLevels.length - 1) {
+        nextLevelIndex += 1;
+        nextExp = 0;
+        addSystemLog(
+          `${skillName} 升级为「${skillLevels[nextLevelIndex].name}」，经验值已重置为 0。`
+        );
+      } else if (
+        nextExp >= level.need &&
+        nextLevelIndex === skillLevels.length - 1
+      ) {
+        nextExp = level.need;
+        addSystemLog(`${skillName} 已达到专家阶段经验上限。`);
+      }
+
+      return {
+        ...prev,
+        [skillName]: {
+          levelIndex: nextLevelIndex,
+          exp: nextExp,
+        },
+      };
+    });
+  };
+
+  const readLiterature = () => {
+    const snapshot = createSnapshot();
+
+    const researchCanGain = dailyGain.readPaperResearch < 0.1;
+    const ambitionCanGain = dailyGain.readPaperAmbition < 0.1;
+
+    if (!researchCanGain && !ambitionCanGain) {
+      changePoints(1, "读文献");
+      addLog(
+        "读文献完成：今日科研和进取心加成已达上限，但仍获得 1 积分。",
+        snapshot
+      );
+      return;
+    }
+
+    const researchGain = researchCanGain ? 0.01 : 0;
+    const ambitionGain = ambitionCanGain ? 0.01 : 0;
+
+    addSkillExp("科研", researchGain);
+    addStats({ ambition: ambitionGain });
+
+    setDailyGain((prev) => ({
+      readPaperResearch: round2(prev.readPaperResearch + researchGain),
+      readPaperAmbition: round2(prev.readPaperAmbition + ambitionGain),
+    }));
+
+    changePoints(1, "读文献");
+
+    addLog(
+      `读文献：科研经验 +${researchGain}，进取心 +${ambitionGain}，积分 +1。`,
+      snapshot
+    );
+  };
+
+  const writePaper = () => {
+    const snapshot = createSnapshot();
+
+    if (paperAccepted) {
+      addSkillExp("科研", 0.01);
+      addStats({ ambition: 0.01 });
+      changePoints(1, "写论文");
+
+      addLog(
+        "论文已完成：继续维护/修改论文，科研经验 +0.01，进取心 +0.01，积分 +1。",
+        snapshot
+      );
+      return;
+    }
+
+    addSkillExp("科研", 0.01);
+    addStats({ ambition: 0.01 });
+    changePoints(1, "写论文");
+
+    setPaperProgress((prev) => {
+      const next = clamp(prev + 1, 0, 100);
+
+      if (next >= 100) {
+        setPaperAccepted(true);
+        addSkillExp("科研", 1);
+        addStats({ ambition: 1 });
+
+        addLog(
+          "写论文：进度 +1%，科研经验 +0.01，进取心 +0.01，积分 +1。论文完成一篇：额外科研经验 +1，进取心 +1。",
+          snapshot
+        );
+      } else {
+        addLog(
+          `写论文：进度 ${next}%，科研经验 +0.01，进取心 +0.01，积分 +1。完成一篇后将额外获得科研经验 +1，进取心 +1。`,
+          snapshot
+        );
+      }
+
+      return next;
+    });
+  };
+
+  const readBook = () => {
+    const snapshot = createSnapshot();
+    const minutes = Math.max(0, toNum(actionMinutes.readBook, 60));
+    const ratio = minutes / 60;
+
+    const knowledgeGain = round2(0.01 * ratio);
+    const pointGain = round2(1 * ratio);
+
+    addStats({ knowledge: knowledgeGain });
+    changePoints(pointGain, "读书");
+
+    addLog(
+      `读书 ${minutes} 分钟：知识 +${knowledgeGain}，积分 +${pointGain}。`,
+      snapshot
+    );
+  };
+
+  const learnLanguage = () => {
+    const snapshot = createSnapshot();
+    const minutes = Math.max(0, toNum(actionMinutes.learnLanguage, 60));
+    const ratio = minutes / 60;
+
+    const expGain = round2(0.01 * ratio);
+    const pointGain = round2(1 * ratio);
+
+    addSkillExp("外语", expGain);
+    changePoints(pointGain, "学外语");
+
+    addLog(
+      `学外语 ${minutes} 分钟：外语技能经验 +${expGain}，积分 +${pointGain}。`,
+      snapshot
+    );
+  };
+
+  const learnSelectedSkill = () => {
+    const snapshot = createSnapshot();
+    const minutes = Math.max(0, toNum(actionMinutes.learnSkill, 60));
+    const ratio = minutes / 60;
+
+    const expGain = round2(0.01 * ratio);
+    const pointGain = round2(1 * ratio);
+
+    addSkillExp(selectedSkill, expGain);
+    changePoints(pointGain, "学技能");
+
+    addLog(
+      `学技能 ${minutes} 分钟：${selectedSkill} 技能经验 +${expGain}，积分 +${pointGain}。`,
+      snapshot
+    );
+  };
+
+  const lightWorkout = () => {
+    const snapshot = createSnapshot();
+
+    addStats({ health: 0.02, ambition: 0.02 });
+    addSkillExp("健身", 0.02);
+    changePoints(1, "轻度运动");
+
+    addLog(
+      "轻度运动：健康 +0.02，进取心 +0.02，健身技能经验 +0.02，积分 +1。",
+      snapshot
+    );
+  };
+
+  const mediumWorkout = () => {
+    const snapshot = createSnapshot();
+
+    addStats({ health: 0.05, ambition: 0.05 });
+    addSkillExp("健身", 0.05);
+    changePoints(1, "中度运动");
+
+    addLog(
+      "中度运动：健康 +0.05，进取心 +0.05，健身技能经验 +0.05，积分 +1。",
+      snapshot
+    );
+  };
+
+  const sing = () => {
+    const snapshot = createSnapshot();
+
+    addSkillExp("唱歌", 0.01);
+    changePoints(1, "唱歌");
+
+    addLog("唱歌：唱歌技能经验 +0.01，积分 +1。", snapshot);
+  };
+
+  const redeem = (item) => {
+    if (points < item.cost) return;
+
+    const snapshot = createSnapshot();
+    const today = getTodayText();
+
+    changePoints(-item.cost, `兑换：${item.name}`);
+
+    setRedeemed((prev) => [
+      {
+        id: makeId(),
+        name: item.name,
+        cost: item.cost,
+        date: today,
+      },
+      ...prev,
+    ]);
+
+    addLog(`兑换成功：${item.name}，消耗 ${item.cost} 积分。`, snapshot);
+  };
+
+  const addCustomAction = () => {
+    if (!customAction.name.trim()) return;
+
+    const snapshot = createSnapshot();
+
+    const statAmount = toNum(customAction.statAmount);
+    const skillAmount = toNum(customAction.skillAmount);
+    const actionPoints = toNum(customAction.points, 1);
+
+    setCustomActions((prev) => [
+      ...prev,
+      {
+        id: makeId(),
+        name: customAction.name.trim(),
+        stat: customAction.stat,
+        skill: customAction.skill,
+        statAmount,
+        skillAmount,
+        points: actionPoints,
+        unit: customAction.unit,
+      },
+    ]);
+
+    addLog(`已添加自定义行动：${customAction.name.trim()}。`, snapshot);
+  };
+
+  const runCustomAction = (action, index) => {
+    const snapshot = createSnapshot();
+    const inputHours = customActionRunHours[index];
+
+    const multiplier =
+      action.unit === "hour" ? Math.max(0, toNum(inputHours, 1)) : 1;
+
+    const statDelta = round2(action.statAmount * multiplier);
+    const skillDelta = round2(action.skillAmount * multiplier);
+    const pointDelta = round2(action.points * multiplier);
+
+    if (action.stat !== "none") {
+      addStats({ [action.stat]: statDelta });
+    }
+
+    if (action.skill !== "none") {
+      addSkillExp(action.skill, skillDelta);
+    }
+
+    changePoints(pointDelta, action.name);
+
+    const statText =
+      action.stat !== "none"
+        ? `${statLabels[action.stat]} ${statDelta >= 0 ? "+" : ""}${statDelta}`
+        : "";
+
+    const skillText =
+      action.skill !== "none"
+        ? `${action.skill}技能经验 ${
+            skillDelta >= 0 ? "+" : ""
+          }${skillDelta}`
+        : "";
+
+    addLog(
+      `${action.name}：${
+        action.unit === "hour" ? `${multiplier} 小时，` : ""
+      }${[statText, skillText].filter(Boolean).join("，")}，积分 ${
+        pointDelta >= 0 ? "+" : ""
+      }${pointDelta}。`,
+      snapshot
+    );
+  };
+
+  const moveCustomAction = (index, direction) => {
+    setCustomActions((prev) => {
+      const next = [...prev];
+      const targetIndex = index + direction;
+
+      if (targetIndex < 0 || targetIndex >= next.length) return prev;
+
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const addCustomSkill = () => {
+    const name = newSkillName.trim();
+    if (!name || skills[name]) return;
+
+    const snapshot = createSnapshot();
+
+    setSkills((prev) => ({
+      ...prev,
+      [name]: { levelIndex: 0, exp: 0 },
+    }));
+
+    setNewSkillName("");
+    addLog(`已添加技能：${name}。`, snapshot);
+  };
+
+  const addCustomReward = () => {
+    if (!customReward.name.trim()) return;
+
+    const snapshot = createSnapshot();
+    const cost = Math.max(1, round2(toNum(customReward.cost, 1)));
+
+    setShopItems((prev) => [
+      ...prev,
+      {
+        name: customReward.name.trim(),
+        cost,
+      },
+    ]);
+
+    addLog(
+      `已添加兑换奖励：${customReward.name.trim()}，需要 ${cost} 积分。`,
+      snapshot
+    );
+  };
+
+  const addLedgerItem = () => {
+    const name = ledgerForm.name.trim();
+    const amount = round2(toNum(ledgerForm.amount, 0));
+    const date = ledgerForm.date || getLocalDateISO();
+
+    if (!name || amount <= 0) {
+      addSystemLog("请输入有效的记账项目和金额。");
+      return;
+    }
+
+    setLedger((prev) => [
+      {
+        id: makeId(),
+        date,
+        name,
+        amount,
+        undone: false,
+      },
+      ...prev,
+    ]);
+
+    setLedgerForm((prev) => ({
+      ...prev,
+      name: "",
+      amount: "",
+    }));
+  };
+
+  const undoLedgerItem = (id) => {
+    setLedger((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              undone: true,
+            }
+          : item
+      )
+    );
+  };
+
+  const activeLedger = ledger.filter((item) => !item.undone);
+  const todayISO = getLocalDateISO();
+
+  const todaySpend = round2(
+    activeLedger
+      .filter((item) => item.date === todayISO)
+      .reduce((sum, item) => sum + item.amount, 0)
+  );
+
+  const monthSpend = round2(
+    activeLedger
+      .filter((item) => item.date.startsWith(ledgerMonth))
+      .reduce((sum, item) => sum + item.amount, 0)
+  );
+
+  const monthLedger = ledger.filter((item) => item.date.startsWith(ledgerMonth));
+
+  const calendarDays = useMemo(() => {
+    const [year, month] = ledgerMonth.split("-").map(Number);
+    const firstDay = new Date(year, month - 1, 1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const blankCount = firstDay.getDay();
+
+    const dailyMap = activeLedger.reduce((map, item) => {
+      if (item.date.startsWith(ledgerMonth)) {
+        const day = Number(item.date.slice(8, 10));
+        map[day] = round2((map[day] || 0) + item.amount);
+      }
+      return map;
+    }, {});
+
+    return [
+      ...Array.from({ length: blankCount }, (_, index) => ({
+        type: "blank",
+        id: `blank-${index}`,
+      })),
+      ...Array.from({ length: daysInMonth }, (_, index) => {
+        const day = index + 1;
+        return {
+          type: "day",
+          day,
+          spend: dailyMap[day] || 0,
+        };
+      }),
+    ];
+  }, [activeLedger, ledgerMonth]);
+
+  const actionButtons = [
+    {
+      label: "读文献",
+      icon: FlaskConical,
+      onClick: readLiterature,
+      hint: "科研经验 +0.01，进取心 +0.01。科研和进取心每日最多各加 0.1。积分 +1。",
+    },
+    {
+      label: "写论文",
+      icon: PenLine,
+      onClick: writePaper,
+      hint: `当前论文进度 ${paperProgress}%。每次：科研经验 +0.01，进取心 +0.01，积分 +1。完成一篇后额外获得科研经验 +1，进取心 +1。`,
+    },
+    {
+      label: "读书",
+      key: "readBook",
+      icon: BookOpen,
+      onClick: readBook,
+      hint: "按分钟结算。60 分钟：知识 +0.01，积分 +1。",
+    },
+    {
+      label: "学外语",
+      key: "learnLanguage",
+      icon: Globe2,
+      onClick: learnLanguage,
+      hint: "按分钟结算。60 分钟：外语技能经验 +0.01，积分 +1。",
+    },
+    {
+      label: "学技能",
+      key: "learnSkill",
+      icon: Sparkles,
+      onClick: learnSelectedSkill,
+      hint: `按分钟结算。60 分钟：${selectedSkill} 技能经验 +0.01，积分 +1。`,
+      needSkillSelect: true,
+    },
+    {
+      label: "轻度运动",
+      icon: Dumbbell,
+      onClick: lightWorkout,
+      hint: "健康 +0.02，进取心 +0.02，健身技能经验 +0.02，积分 +1。",
+    },
+    {
+      label: "中度运动",
+      icon: Dumbbell,
+      onClick: mediumWorkout,
+      hint: "健康 +0.05，进取心 +0.05，健身技能经验 +0.05，积分 +1。",
+    },
+    {
+      label: "唱歌",
+      icon: Mic2,
+      onClick: sing,
+      hint: "唱歌技能经验 +0.01，积分 +1。",
+    },
+  ];
+
+  return (
+    <main
+      className="min-h-screen p-3 text-slate-900"
+      style={{ backgroundColor: selectedPageColor }}
+    >
+      <div className="mx-auto min-h-[92vh] max-w-[430px] overflow-hidden rounded-[2rem] bg-gradient-to-b from-slate-100 via-white to-slate-100 shadow-2xl ring-1 ring-white/10">
+        <motion.section
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="relative overflow-hidden rounded-b-[1.6rem] px-5 py-4 text-white"
+          style={{ backgroundColor: selectedPageColor }}
+        >
+          <h1 className="relative text-3xl font-black tracking-tight">
+            地球online 读博版
+          </h1>
+        </motion.section>
+
+        <Tabs defaultValue="dashboard" className="space-y-3 p-3 pb-24">
+          <TabsContent value="dashboard" className="space-y-3">
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-3 p-4">
+                <h2 className="text-lg font-bold">人物属性</h2>
+
+                <StatBar
+                  label="体重"
+                  value={stats.weight}
+                  max={INITIAL_WEIGHT}
+                  suffix=" 斤"
+                />
+                <StatBar label="健康值" value={stats.health} />
+                <StatBar label="知识" value={stats.knowledge} />
+                <StatBar label="进取心" value={stats.ambition} />
+              </CardContent>
+            </Card>
+
+            <section className="grid grid-cols-2 gap-2">
+              {orderedSkillEntries.map(([name, skill]) => (
+                <SkillCard key={name} name={name} skill={skill} />
+              ))}
+            </section>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <LineChart className="h-4 w-4" />
+                  <h2 className="text-lg font-bold">属性成长曲线</h2>
+                </div>
+
+                <div className="h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ReLineChart
+                      data={history}
+                      margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
+                    >
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Line
+                        type="monotone"
+                        dataKey="health"
+                        name="健康"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="knowledge"
+                        name="知识"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="ambition"
+                        name="进取心"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </ReLineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <LineChart className="h-4 w-4" />
+                  <h2 className="text-lg font-bold">体重曲线</h2>
+                </div>
+
+                <div className="h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ReLineChart
+                      data={history}
+                      margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
+                    >
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Line
+                        type="monotone"
+                        dataKey="weight"
+                        name="体重"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </ReLineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <Trophy className="h-4 w-4" />
+                  <h2 className="text-lg font-bold">成长日志</h2>
+                </div>
+
+                <div className="space-y-2">
+                  {log.slice(0, 8).map((item) => (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-xs ${
+                        item.undone
+                          ? "bg-slate-100 text-slate-400"
+                          : "bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      <div className="flex-1 leading-5">{item.message}</div>
+
+                      {item.snapshot && !item.undone && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => undoLogItem(item.id)}
+                          className="h-7 shrink-0 rounded-full px-2 text-[10px]"
+                        >
+                          撤回
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="actions" className="space-y-3">
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="p-3">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <MiniInput
+                      label="当前体重（斤）"
+                      type="number"
+                      value={weightInput}
+                      onChange={setWeightInput}
+                      placeholder="例如：154"
+                    />
+                  </div>
+
+                  <Button
+                    onClick={updateCurrentWeight}
+                    className="h-10 shrink-0 rounded-xl px-4"
+                  >
+                    更新
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="p-4">
+                <div className="mb-3">
+                  <h2 className="text-xl font-bold">今日行动</h2>
+                </div>
+
+                <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  读文献今日加成：科研 {dailyGain.readPaperResearch}/0.1，
+                  进取心 {dailyGain.readPaperAmbition}/0.1
+                </div>
+
+                <div className="grid gap-2">
+                  {actionButtons.map((action, index) => {
+                    const Icon = action.icon;
+                    const needMinutesInput = [
+                      "readBook",
+                      "learnLanguage",
+                      "learnSkill",
+                    ].includes(action.key);
+
+                    const isHintOpen = openActionHint === index;
+
+                    return (
+                      <div
+                        key={action.label}
+                        className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100">
+                            <Icon className="h-4 w-4" />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenActionHint((prev) =>
+                                      prev === index ? null : index
+                                    )
+                                  }
+                                  className="text-left font-semibold leading-5 text-slate-800 underline-offset-4 hover:underline"
+                                >
+                                  {action.label}
+                                </button>
+
+                                {isHintOpen && (
+                                  <div className="mt-1 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                                    {action.hint}
+                                  </div>
+                                )}
+                              </div>
+
+                              {!needMinutesInput && (
+                                <Button
+                                  size="sm"
+                                  onClick={action.onClick}
+                                  className="h-8 shrink-0 rounded-full px-3 text-xs"
+                                >
+                                  完成
+                                </Button>
+                              )}
+                            </div>
+
+                            {needMinutesInput && (
+                              <div className="mt-2 flex items-end gap-2">
+                                {action.needSkillSelect && (
+                                  <div className="w-24 shrink-0 space-y-1">
+                                    <Label className="text-[10px] text-slate-500">
+                                      技能
+                                    </Label>
+                                    <Select
+                                      value={selectedSkill}
+                                      onValueChange={setSelectedSkill}
+                                    >
+                                      <SelectTrigger className="h-8 rounded-xl bg-white px-2 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {skillNames.map((skillName) => (
+                                          <SelectItem
+                                            key={skillName}
+                                            value={skillName}
+                                          >
+                                            {skillName}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+
+                                <div className="flex-1 space-y-1">
+                                  <Label className="text-[10px] text-slate-500">
+                                    分钟
+                                  </Label>
+                                  <Input
+                                    type="number"
+                                    value={actionMinutes[action.key]}
+                                    onChange={(event) =>
+                                      setActionMinutes((prev) => ({
+                                        ...prev,
+                                        [action.key]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="60"
+                                    className="h-8 rounded-xl bg-white text-xs"
+                                  />
+                                </div>
+
+                                <Button
+                                  size="sm"
+                                  onClick={action.onClick}
+                                  className="h-8 shrink-0 rounded-xl px-3 text-xs"
+                                >
+                                  完成
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="shop" className="space-y-4">
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="p-5">
+                <div className="mb-5 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Gift className="h-5 w-5" />
+                    <h2 className="text-xl font-bold">积分兑换</h2>
+                  </div>
+
+                  <Badge className="rounded-full">{points} 积分</Badge>
+                </div>
+
+                <div className="space-y-4">
+                  {[...shopItems]
+                    .sort((a, b) => a.cost - b.cost)
+                    .map((item) => (
+                      <ShopItem
+                        key={`${item.name}-${item.cost}`}
+                        item={item}
+                        points={points}
+                        onRedeem={redeem}
+                      />
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="p-5">
+                <h2 className="text-xl font-bold">已兑换奖励</h2>
+
+                <div className="mt-4 space-y-3">
+                  {redeemed.length === 0 ? (
+                    <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                      还没有兑换。继续行动积累积分。
+                    </div>
+                  ) : (
+                    redeemed.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
+                      >
+                        <div className="font-semibold">{item.name}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          兑换日期：{item.date} ｜ 消耗 {item.cost} 积分
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="p-5">
+                <h2 className="text-xl font-bold">积分变化过程</h2>
+
+                <div className="mt-4 space-y-3">
+                  {pointHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-semibold">{item.reason}</div>
+                        <div
+                          className={`tabular-nums ${
+                            item.change >= 0
+                              ? "text-emerald-600"
+                              : "text-rose-600"
+                          }`}
+                        >
+                          {item.change >= 0 ? "+" : ""}
+                          {item.change}
+                        </div>
+                      </div>
+
+                      <div className="mt-1 text-xs text-slate-500">
+                        {item.date} ｜ {item.before} → {item.after}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="ledger" className="space-y-3">
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold">记账</h2>
+                  <Input
+                    type="month"
+                    value={ledgerMonth}
+                    onChange={(event) => setLedgerMonth(event.target.value)}
+                    className="h-8 w-32 rounded-xl bg-white text-xs"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    type="date"
+                    value={ledgerForm.date}
+                    onChange={(event) =>
+                      setLedgerForm((p) => ({
+                        ...p,
+                        date: event.target.value,
+                      }))
+                    }
+                    className="h-8 rounded-xl bg-white px-2 text-xs"
+                  />
+
+                  <Input
+                    value={ledgerForm.name}
+                    onChange={(event) =>
+                      setLedgerForm((p) => ({
+                        ...p,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="项目"
+                    className="h-8 rounded-xl bg-white px-2 text-xs"
+                  />
+
+                  <Input
+                    type="number"
+                    value={ledgerForm.amount}
+                    onChange={(event) =>
+                      setLedgerForm((p) => ({
+                        ...p,
+                        amount: event.target.value,
+                      }))
+                    }
+                    placeholder="金额"
+                    className="h-8 rounded-xl bg-white px-2 text-xs"
+                  />
+                </div>
+
+                <Button
+                  onClick={addLedgerItem}
+                  className="h-8 w-full rounded-full text-xs"
+                >
+                  添加记账
+                </Button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <div className="text-[10px] text-slate-500">本日花费</div>
+                    <div className="mt-1 text-lg font-bold">
+                      {todaySpend} 元
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <div className="text-[10px] text-slate-500">本月花费</div>
+                    <div className="mt-1 text-lg font-bold">
+                      {monthSpend} 元
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-4">
+                <h2 className="text-lg font-bold">日历花费</h2>
+
+                <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500">
+                  {["日", "一", "二", "三", "四", "五", "六"].map((day) => (
+                    <div key={day}>{day}</div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {calendarDays.map((item) =>
+                    item.type === "blank" ? (
+                      <div key={item.id} />
+                    ) : (
+                      <div
+                        key={item.day}
+                        className="min-h-10 rounded-lg bg-slate-50 p-1 text-center"
+                      >
+                        <div className="text-[10px] font-semibold text-slate-700">
+                          {item.day}
+                        </div>
+
+                        {item.spend > 0 && (
+                          <div className="mt-0.5 truncate text-[9px] text-rose-600">
+                            {item.spend}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-slate-200 shadow-sm">
+              <CardContent className="p-4">
+                <h2 className="text-lg font-bold">本月明细</h2>
+
+                <div className="mt-3 space-y-2">
+                  {monthLedger.length === 0 ? (
+                    <div className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">
+                      本月还没有记账。
+                    </div>
+                  ) : (
+                    monthLedger.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`flex items-center justify-between gap-3 rounded-2xl p-3 text-sm ${
+                          item.undone
+                            ? "bg-slate-100 text-slate-400"
+                            : "bg-slate-50 text-slate-700"
+                        }`}
+                      >
+                        <div>
+                          <div className="font-semibold">{item.name}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {item.date} ｜ {item.amount} 元
+                            {item.undone ? " ｜ 已撤销" : ""}
+                          </div>
+                        </div>
+
+                        {!item.undone && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => undoLedgerItem(item.id)}
+                            className="h-8 shrink-0 rounded-full px-3 text-xs"
+                          >
+                            撤销
+                          </Button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="custom" className="space-y-2">
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-3">
+                <div className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  <h2 className="text-lg font-bold">自定义技能</h2>
+                </div>
+
+                <MiniInput
+                  label="技能名称"
+                  value={newSkillName}
+                  onChange={setNewSkillName}
+                  placeholder="例如：统计学"
+                />
+
+                <Button
+                  onClick={addCustomSkill}
+                  className="h-9 w-full rounded-full text-xs"
+                >
+                  添加技能
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-3">
+                <div className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  <h2 className="text-lg font-bold">自定义行动</h2>
+                </div>
+
+                <MiniInput
+                  label="行动名称"
+                  value={customAction.name}
+                  onChange={(v) =>
+                    setCustomAction((p) => ({
+                      ...p,
+                      name: v,
+                    }))
+                  }
+                  placeholder="例如：早睡"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">结算方式</Label>
+                    <Select
+                      value={customAction.unit}
+                      onValueChange={(v) =>
+                        setCustomAction((p) => ({
+                          ...p,
+                          unit: v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="h-9 rounded-xl bg-white text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {unitOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">影响属性</Label>
+                    <Select
+                      value={customAction.stat}
+                      onValueChange={(v) =>
+                        setCustomAction((p) => ({
+                          ...p,
+                          stat: v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="h-9 rounded-xl bg-white text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">不影响属性</SelectItem>
+                        {statOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <MiniInput
+                  label={
+                    customAction.unit === "hour"
+                      ? "每小时属性变化"
+                      : "属性变化"
+                  }
+                  type="number"
+                  value={customAction.statAmount}
+                  onChange={(v) =>
+                    setCustomAction((p) => ({
+                      ...p,
+                      statAmount: v,
+                    }))
+                  }
+                  placeholder="0.02"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">影响技能</Label>
+                    <Select
+                      value={customAction.skill}
+                      onValueChange={(v) =>
+                        setCustomAction((p) => ({
+                          ...p,
+                          skill: v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="h-9 rounded-xl bg-white text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">不影响技能</SelectItem>
+                        {skillNames.map((skillName) => (
+                          <SelectItem key={skillName} value={skillName}>
+                            {skillName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <MiniInput
+                    label={
+                      customAction.unit === "hour"
+                        ? "每小时技能经验"
+                        : "技能经验"
+                    }
+                    type="number"
+                    value={customAction.skillAmount}
+                    onChange={(v) =>
+                      setCustomAction((p) => ({
+                        ...p,
+                        skillAmount: v,
+                      }))
+                    }
+                    placeholder="0.02"
+                  />
+                </div>
+
+                <MiniInput
+                  label={
+                    customAction.unit === "hour"
+                      ? "每小时获得积分"
+                      : "获得积分"
+                  }
+                  type="number"
+                  value={customAction.points}
+                  onChange={(v) =>
+                    setCustomAction((p) => ({
+                      ...p,
+                      points: v,
+                    }))
+                  }
+                  placeholder="1"
+                />
+
+                <Button
+                  onClick={addCustomAction}
+                  className="h-9 w-full rounded-full text-xs"
+                >
+                  添加行动
+                </Button>
+
+                <div className="space-y-2">
+                  {customActions.map((action, index) => (
+                    <div
+                      key={action.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-slate-800">
+                            {action.name}
+                          </div>
+
+                          <div className="mt-1 leading-5 text-slate-500">
+                            {action.stat !== "none" && (
+                              <>
+                                {statLabels[action.stat]}{" "}
+                                {action.statAmount >= 0 ? "+" : ""}
+                                {action.statAmount}
+                                {action.unit === "hour" ? "/小时" : ""}
+                              </>
+                            )}
+
+                            {action.stat !== "none" &&
+                              action.skill !== "none" &&
+                              "，"}
+
+                            {action.skill !== "none" && (
+                              <>
+                                {action.skill}技能经验{" "}
+                                {action.skillAmount >= 0 ? "+" : ""}
+                                {action.skillAmount}
+                                {action.unit === "hour" ? "/小时" : ""}
+                              </>
+                            )}
+
+                            ，积分 {action.points >= 0 ? "+" : ""}
+                            {action.points}
+                            {action.unit === "hour" ? "/小时" : ""}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={index === 0}
+                            onClick={() => moveCustomAction(index, -1)}
+                            className="h-7 rounded-full px-2 text-xs"
+                          >
+                            ↑
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={index === customActions.length - 1}
+                            onClick={() => moveCustomAction(index, 1)}
+                            className="h-7 rounded-full px-2 text-xs"
+                          >
+                            ↓
+                          </Button>
+                        </div>
+                      </div>
+
+                      {action.unit === "hour" && (
+                        <div className="mt-2">
+                          <MiniInput
+                            label="本次执行时间（小时）"
+                            type="number"
+                            value={customActionRunHours[index] ?? ""}
+                            onChange={(v) =>
+                              setCustomActionRunHours((prev) => ({
+                                ...prev,
+                                [index]: v,
+                              }))
+                            }
+                            placeholder="例如：1.5"
+                          />
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={() => runCustomAction(action, index)}
+                        className="mt-2 h-8 w-full rounded-full text-xs"
+                      >
+                        完成行动
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-3">
+                <h2 className="text-lg font-bold">自定义兑换</h2>
+
+                <MiniInput
+                  label="奖励名称"
+                  value={customReward.name}
+                  onChange={(v) =>
+                    setCustomReward((p) => ({
+                      ...p,
+                      name: v,
+                    }))
+                  }
+                  placeholder="例如：奶茶"
+                />
+
+                <MiniInput
+                  label="需要积分"
+                  type="number"
+                  value={customReward.cost}
+                  onChange={(v) =>
+                    setCustomReward((p) => ({
+                      ...p,
+                      cost: v,
+                    }))
+                  }
+                  placeholder="80"
+                />
+
+                <Button
+                  onClick={addCustomReward}
+                  className="h-9 w-full rounded-full text-xs"
+                >
+                  添加奖励
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-3">
+                <h2 className="text-lg font-bold">自定义页面颜色</h2>
+
+                <div className="grid grid-cols-[56px_1fr] items-end gap-3">
+                  <Input
+                    type="color"
+                    value={selectedPageColor}
+                    onChange={(event) => setPageColor(event.target.value)}
+                    className="h-10 w-14 cursor-pointer rounded-xl bg-white p-1"
+                  />
+
+                  <MiniInput
+                    label="颜色值"
+                    value={selectedPageColor}
+                    onChange={setPageColor}
+                    placeholder="#020617"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-3">
+                <h2 className="text-lg font-bold">数据管理</h2>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    onClick={exportData}
+                    className="h-9 rounded-full text-xs"
+                  >
+                    导出数据
+                  </Button>
+
+                  <label className="flex h-9 cursor-pointer items-center justify-center rounded-full bg-slate-900 text-xs text-white">
+                    导入数据
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={importData}
+                    />
+                  </label>
+
+                  <Button
+                    onClick={clearSaveData}
+                    variant="outline"
+                    className="h-9 rounded-full text-xs"
+                  >
+                    清空数据
+                  </Button>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">
+                  数据会自动保存在当前浏览器。长期使用建议定期点“导出数据”备份。
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <div className="fixed bottom-3 left-0 z-50 w-full px-3">
+            <div className="mx-auto max-w-[430px] rounded-[1.6rem] bg-white/90 p-2 shadow-2xl backdrop-blur">
+              <TabsList className="grid w-full grid-cols-5 rounded-2xl bg-slate-200/80 p-1">
+                <TabsTrigger value="dashboard" className="rounded-xl text-xs">
+                  面板
+                </TabsTrigger>
+                <TabsTrigger value="actions" className="rounded-xl text-xs">
+                  行动
+                </TabsTrigger>
+                <TabsTrigger value="shop" className="rounded-xl text-xs">
+                  兑换
+                </TabsTrigger>
+                <TabsTrigger value="ledger" className="rounded-xl text-xs">
+                  记账
+                </TabsTrigger>
+                <TabsTrigger value="custom" className="rounded-xl text-xs">
+                  自定义
+                </TabsTrigger>
+              </TabsList>
+            </div>
+          </div>
+        </Tabs>
+      </div>
+    </main>
+  );
+}
